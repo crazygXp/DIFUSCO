@@ -88,7 +88,7 @@ class TSPModel(COMetaModel):
 
   def gaussian_training_step(self, batch, batch_idx):
     if self.sparse:
-      # TODO: Implement Gaussian diffusion with sparse graphs
+      # TODO: Implement Gaussian diffusion with sparse graphs 任务：使用稀疏图实现高斯扩散
       raise ValueError("DIFUSCO with sparse graphs are not supported for Gaussian diffusion")
     _, points, adj_matrix, _ = batch
 
