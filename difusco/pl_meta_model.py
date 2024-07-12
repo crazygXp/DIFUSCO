@@ -146,17 +146,33 @@ class COMetaModel(pl.LightningModule):
     return xt
 
   def gaussian_posterior(self, target_t, t, pred, xt):
-    """Sample (or deterministically denoise) from the Gaussian posterior for a given time step.
+    '''
+    Sample (or deterministically denoise) from the Gaussian posterior for a given time step.
        See https://arxiv.org/pdf/2010.02502.pdf for details.
-    """
+       实现的是去噪的过程
+    Args:
+      target_t:目标时间步长，表示在扩散或逆扩散过程中我们想要达到或关注的时间点
+      t:当前时间步长，用于索引扩散过程中的参数
+      pred:预测的噪声
+      xt:当前时间步的数据，表示在扩散过程中添加了噪声的数据
+
+    Returns:
+
+    '''
+
     diffusion = self.diffusion
     if target_t is None:
       target_t = t - 1
     else:
       target_t = torch.from_numpy(target_t).view(1)
 
-    atbar = diffusion.alphabar[t]
-    atbar_target = diffusion.alphabar[target_t]
+    '''
+    方差减少因子（alpha）：在扩散模型中，每一步都会向数据添加一些噪声，使数据的方差逐渐增大。
+     方差减少因子是一个小于1的数，它告诉我们在逆向过程中，每一步需要减少多少噪声，以便让数据的方差逐渐回到原始状态。
+     累积方差减少因子（alphabar）：这是方差减少因子在所有步骤上的累积乘积。它表示到目前为止，数据的方差总共减少了多少。
+    '''
+    atbar = diffusion.alphabar[t] #当前时间步 t 的累积方差减少因子
+    atbar_target = diffusion.alphabar[target_t] #这是目标时间步 target_t 的累积方差减少因子
 
     if self.args.inference_trick is None or t <= 1:
       # Use DDPM posterior
@@ -175,7 +191,10 @@ class COMetaModel(pl.LightningModule):
     return xt_target
 
   def duplicate_edge_index(self, edge_index, num_nodes, device):
-    """Duplicate the edge index (in sparse graphs) for parallel sampling."""
+    """Duplicate the edge index (in sparse graphs) for parallel sampling.
+    实现在图数据结构中对边索引的复制和调整，以便支持并行采样
+    就是在并行计算的时候有各自对应的边索引
+    """
     edge_index = edge_index.reshape((2, 1, -1))
     edge_index_indent = torch.arange(0, self.args.parallel_sampling).view(1, -1, 1).to(device)
     edge_index_indent = edge_index_indent * num_nodes
