@@ -92,14 +92,17 @@ class TSPModel(COMetaModel):
       raise ValueError("DIFUSCO with sparse graphs are not supported for Gaussian diffusion")
     _, points, adj_matrix, _ = batch
 
+    # 邻接矩阵预处理
     adj_matrix = adj_matrix * 2 - 1
     adj_matrix = adj_matrix * (1.0 + 0.05 * torch.rand_like(adj_matrix))
-    # Sample from diffusion
+    # 高斯扩散采样——加噪
     t = np.random.randint(1, self.diffusion.T + 1, adj_matrix.shape[0]).astype(int)
-    xt, epsilon = self.diffusion.sample(adj_matrix, t)
+    xt, epsilon = self.diffusion.sample(adj_matrix, t) #扩散后的数据 xt 和生成的真实随机噪声 epsilon
 
+    #将随机生成的时间步 t 转换为 PyTorch 张量
     t = torch.from_numpy(t).float().view(adj_matrix.shape[0])
-    # Denoise
+    # 去噪
+    # 噪声预测 用来训练扩散模型
     epsilon_pred = self.forward(
         points.float().to(adj_matrix.device),
         xt.float().to(adj_matrix.device),
@@ -108,16 +111,16 @@ class TSPModel(COMetaModel):
     )
     epsilon_pred = epsilon_pred.squeeze(1)
 
-    # Compute loss
+    # 也就是不断迭代这个损失从而实现扩散模型对噪声的预测越来越精准从而对数据恢复的效果越来越好
     loss = F.mse_loss(epsilon_pred, epsilon.float())
     self.log("train/loss", loss)
     return loss
 
   def training_step(self, batch, batch_idx):
     if self.diffusion_type == 'gaussian':
-      return self.gaussian_training_step(batch, batch_idx)
+      return self.gaussian_training_step(batch, batch_idx)#loss
     elif self.diffusion_type == 'categorical':
-      return self.categorical_training_step(batch, batch_idx)
+      return self.categorical_training_step(batch, batch_idx) #loss
 
   def categorical_denoise_step(self, points, xt, t, device, edge_index=None, target_t=None):
     with torch.no_grad():
@@ -134,10 +137,36 @@ class TSPModel(COMetaModel):
       else:
         x0_pred_prob = x0_pred.reshape((1, points.shape[0], -1, 2)).softmax(dim=-1)
 
+
+      # 计算对应路径的长度
+      if not self.sparse:
+        dis_matrix = self.points2adj(points)
+        cost_est = (dis_matrix * x0_pred_prob[..., 1]).sum()
+        # cost_est.requires_grad_(True)
+        # cost_est.backward()
+      else:
+        dis_matrix = torch.sqrt(torch.sum((points[edge_index.T[:, 0]] - points[edge_index.T[:, 1]]) ** 2, dim=1))
+        dis_matrix = dis_matrix.reshape((1, points.shape[0], -1))
+        cost_est = (dis_matrix * x0_pred_prob[..., 1]).sum()
+        # cost_est.requires_grad_(True)
+        # cost_est.backward()
       xt = self.categorical_posterior(target_t, t, x0_pred_prob, xt)
-      return xt
+      return xt,cost_est
 
   def gaussian_denoise_step(self, points, xt, t, device, edge_index=None, target_t=None):
+    '''
+    高斯去噪
+    Args:
+      points:节点坐标
+      xt:扩散后的数据
+      t:时间步
+      device:
+      edge_index:
+      target_t:目标时间步
+
+    Returns: 去噪后的数据
+
+    '''
     with torch.no_grad():
       t = torch.from_numpy(t).view(1)
       pred = self.forward(
@@ -151,6 +180,16 @@ class TSPModel(COMetaModel):
       return xt
 
   def test_step(self, batch, batch_idx, split='test'):
+    '''评估测试集和测试模型的性能
+
+    Args:
+      batch:
+      batch_idx:
+      split:
+
+    Returns:
+
+    '''
     edge_index = None
     np_edge_index = None
     device = batch[-1].device
@@ -222,8 +261,9 @@ class TSPModel(COMetaModel):
         adj_mat = xt.float().cpu().detach().numpy() + 1e-6
 
       if self.args.save_numpy_heatmap:
-        self.run_save_numpy_heatmap(adj_mat, np_points, real_batch_idx, split)
+        self.run_save_numpy_heatmap(adj_mat, np_points, real_batch_idx, split)\
 
+      # 后处理
       tours, merge_iterations = merge_tours(
           adj_mat, np_points, np_edge_index,
           sparse_graph=self.sparse,
@@ -239,7 +279,7 @@ class TSPModel(COMetaModel):
     solved_tours = np.concatenate(stacked_tours, axis=0)
 
     tsp_solver = TSPEvaluator(np_points)
-    gt_cost = tsp_solver.evaluate(np_gt_tour)
+    gt_cost = tsp_solver.evaluate(np_gt_tour) #评估模型生成的路径与实际最优路径之间的差异
 
     total_sampling = self.args.parallel_sampling * self.args.sequential_sampling
     all_solved_costs = [tsp_solver.evaluate(solved_tours[i]) for i in range(total_sampling)]
@@ -266,5 +306,49 @@ class TSPModel(COMetaModel):
     np.save(os.path.join(heatmap_path, f"{split}-heatmap-{real_batch_idx}.npy"), adj_mat)
     np.save(os.path.join(heatmap_path, f"{split}-points-{real_batch_idx}.npy"), np_points)
 
+
+
   def validation_step(self, batch, batch_idx):
     return self.test_step(batch, batch_idx, split='val')
+
+'两个方法留作备用'
+def tour2adj(self, tour, points, sparse, sparse_factor, edge_index):
+    '''它根据给定的旅行序列（tour）和点集（points）生成一个邻接矩阵（adjacency matrix）。
+
+    这个函数可以处理两种情况：密集（非稀疏）和稀疏
+    Args:
+      tour:
+      points:
+      sparse:
+      sparse_factor:
+      edge_index:
+
+    Returns:
+
+    '''
+    if not sparse:
+      adj_matrix = torch.zeros((points.shape[0], points.shape[0]))
+      for i in range(tour.shape[0] - 1):
+        adj_matrix[tour[i], tour[i + 1]] = 1
+    else:
+      adj_matrix = np.zeros(points.shape[0], dtype=np.int64)
+      adj_matrix[tour[:-1]] = tour[1:]
+      adj_matrix = torch.from_numpy(adj_matrix)
+      adj_matrix = adj_matrix.reshape((-1, 1)).repeat(1, sparse_factor).reshape(-1)
+      adj_matrix = torch.eq(edge_index[1].cpu(), adj_matrix).to(torch.int)
+    return adj_matrix
+def points2adj(self, points):
+    '''计算给定点集之间的距离矩阵
+
+              return distance matrix
+    Args:
+      points:
+
+    Args:
+      points: b, n, 2
+    Returns: b, n, n
+    Returns:
+
+    '''
+    assert points.dim() == 3
+    return torch.sum((points.unsqueeze(2) - points.unsqueeze(1)) ** 2, dim=-1) ** 0.5

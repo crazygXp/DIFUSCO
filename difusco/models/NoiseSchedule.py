@@ -34,7 +34,7 @@ class DenseMonotone(nn.Dense):
         #
         # # 使用 np.tensordot 沿着 inputs 的最后一个维度和 kernel 的第一个维度进行矩阵乘法
         # y = np.tensordot(inputs, kernel, axes=([last_dim_index], [0]))
-        y = np.tensordot(inputs, kernel, axes=((-1,), (0,)), dtype=np.float32)
+        y = np.tensordot(inputs, kernel, axes=((-1,), (0,)), dtype=np.float16)
         # , dtype = self.precision 这个自动精度控制无法实现 因为不知道要的精度是多少
         # 暂时设为float 32
         # y = jax.lax.dot_general(inputs, kernel,

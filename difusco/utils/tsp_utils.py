@@ -88,16 +88,14 @@ def cython_merge(points, adj_mat):
 
 def merge_tours(adj_mat, np_points, edge_index_np, sparse_graph=False, parallel_sampling=1):
   """
-  To extract a tour from the inferred adjacency matrix A, we used the following greedy edge insertion
-  procedure.
-  • Initialize extracted tour with an empty graph with N vertices.
-  • Sort all the possible edges (i, j) in decreasing order of Aij/kvi − vjk (i.e., the inverse edge weight,
-  multiplied by inferred likelihood). Call the resulting edge list (i1, j1),(i2, j2), . . . .
-  • For each edge (i, j) in the list:
-    – If inserting (i, j) into the graph results in a complete tour, insert (i, j) and terminate.
+  为了从推断的邻接矩阵 A 中提取一个旅行路径，我们使用了以下贪婪边插入过程
+  • 初始化提取的旅行路径为空图，含有 N 个顶点
+  • 将所有可能的边 (i, j) 按照 Aij/kvi − vjk 的递减顺序排序（即反向边权重乘以推断的概率）。称结果为边列表 (i1, j1),(i2, j2), . . . 。
+  • 对于列表中的每一条边 (i, j)：
+    – 如果将 (i, j) 插入图中形成完整的旅行路径，则插入 (i, j) 并终止
     – If inserting (i, j) results in a graph with cycles (of length < N), continue.
-    – Otherwise, insert (i, j) into the tour.
-  • Return the extracted tour.
+    – 如果将 (i, j) 插入图中导致形成带有小于 N 的环的图，则继续。否则，将 (i, j) 插入旅行路径中。
+  • 返回提取的旅行路径。
   """
   splitted_adj_mat = np.split(adj_mat, parallel_sampling, axis=0)
 
